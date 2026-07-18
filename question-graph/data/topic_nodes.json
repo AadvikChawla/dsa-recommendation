@@ -20,6 +20,11 @@
     "topic_name": "Binary Search"
   },
   {
+    "topic_slug": "binary_search_tree",
+    "topic_id": "binary_search_tree",
+    "topic_name": "Binary Search Tree"
+  },
+  {
     "topic_slug": "binary_tree",
     "topic_id": "binary_tree",
     "topic_name": "Binary Tree"
@@ -28,6 +33,11 @@
     "topic_slug": "bit_manipulation",
     "topic_id": "bit_manipulation",
     "topic_name": "Bit Manipulation"
+  },
+  {
+    "topic_slug": "bitmask",
+    "topic_id": "bitmask",
+    "topic_name": "Bitmask"
   },
   {
     "topic_slug": "bitmask_dp",
@@ -40,9 +50,29 @@
     "topic_name": "Combinatorics"
   },
   {
+    "topic_slug": "concurrency",
+    "topic_id": "concurrency",
+    "topic_name": "Concurrency"
+  },
+  {
     "topic_slug": "connected_components",
     "topic_id": "connected_components",
     "topic_name": "Connected Components"
+  },
+  {
+    "topic_slug": "counting",
+    "topic_id": "counting",
+    "topic_name": "Counting"
+  },
+  {
+    "topic_slug": "data_stream",
+    "topic_id": "data_stream",
+    "topic_name": "Data Stream"
+  },
+  {
+    "topic_slug": "database",
+    "topic_id": "database",
+    "topic_name": "Database"
   },
   {
     "topic_slug": "design",
@@ -75,14 +105,34 @@
     "topic_name": "Dynamic Programming"
   },
   {
+    "topic_slug": "enumeration",
+    "topic_id": "enumeration",
+    "topic_name": "Enumeration"
+  },
+  {
     "topic_slug": "fast_slow_pointers",
     "topic_id": "fast_slow_pointers",
     "topic_name": "Fast Slow Pointers"
   },
   {
+    "topic_slug": "fenwick_tree",
+    "topic_id": "fenwick_tree",
+    "topic_name": "Fenwick Tree"
+  },
+  {
     "topic_slug": "floyd_warshall",
     "topic_id": "floyd_warshall",
     "topic_name": "Floyd Warshall"
+  },
+  {
+    "topic_slug": "game_theory",
+    "topic_id": "game_theory",
+    "topic_name": "Game Theory"
+  },
+  {
+    "topic_slug": "geometry",
+    "topic_id": "geometry",
+    "topic_name": "Geometry"
   },
   {
     "topic_slug": "graph",
@@ -170,6 +220,11 @@
     "topic_name": "Number Theory"
   },
   {
+    "topic_slug": "ordered_set",
+    "topic_id": "ordered_set",
+    "topic_name": "Ordered Set"
+  },
+  {
     "topic_slug": "prefix_sum",
     "topic_id": "prefix_sum",
     "topic_name": "Prefix Sum"
@@ -180,9 +235,19 @@
     "topic_name": "Prefix Xor"
   },
   {
+    "topic_slug": "probability",
+    "topic_id": "probability",
+    "topic_name": "Probability"
+  },
+  {
     "topic_slug": "queue",
     "topic_id": "queue",
     "topic_name": "Queue"
+  },
+  {
+    "topic_slug": "randomized",
+    "topic_id": "randomized",
+    "topic_name": "Randomized"
   },
   {
     "topic_slug": "range_query",
@@ -195,9 +260,24 @@
     "topic_name": "Recursion"
   },
   {
+    "topic_slug": "rolling_hash",
+    "topic_id": "rolling_hash",
+    "topic_name": "Rolling Hash"
+  },
+  {
+    "topic_slug": "segment_tree",
+    "topic_id": "segment_tree",
+    "topic_name": "Segment Tree"
+  },
+  {
     "topic_slug": "sequence_dp",
     "topic_id": "sequence_dp",
     "topic_name": "Sequence Dp"
+  },
+  {
+    "topic_slug": "shell",
+    "topic_id": "shell",
+    "topic_name": "Shell"
   },
   {
     "topic_slug": "shortest_path",

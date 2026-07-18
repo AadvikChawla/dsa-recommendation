@@ -3,15 +3,28 @@ regenerate_graph_artifacts.py
 
 Regenerates the Problem-Concept Graph (PCG) and Concept-Concept Graph (CCG)
 artifacts from curated source-target.txt, which already uses the
-72 canonical backend topics. Replaces the old AI-enriched 487-tag graph.
+70 canonical backend topics (data/topic_tags_taxonomy_v2.json). Replaces
+the old AI-enriched 487-tag graph.
 
 What this replaces / why:
     The old problem_topic_edges_normalized.json was built from AI-enriched
     tags that produced ~487 distinct topics -- far more granular than the
     backend's taxonomy and causing BKT/HLR to update topics the backend
-    table doesn't even have columns for. source-target.txt is 
-    hand-curated mapping using exactly the 72 canonical tags the backend
-    uses. This script uses it as the single source of truth.
+    table doesn't even have columns for. source-target.txt is
+    hand-curated mapping using exactly the 70 canonical tags the backend
+    uses. This script uses it as the single source of truth for EDGES --
+    no tag is ever inferred or invented here.
+
+Node coverage (both node sets are now complete, independent of edges):
+    - problem_nodes.json includes every problem in the manifest (2913),
+      not just the ones with a curated topic mapping. Problems without a
+      curated mapping simply have zero problem-topic edges -- they are
+      NOT assigned any invented/inferred tag.
+    - topic_nodes.json includes all 70 canonical topics from
+      topic_tags_taxonomy_v2.json, not just the ones that happen to be an
+      edge target today (e.g. "database"/"shell" have no curated problems
+      yet since those LeetCode problems have no Python solution, but the
+      topic nodes themselves should still exist for graph completeness).
 
 Output files (same names as before -- nothing downstream changes):
 
@@ -28,7 +41,7 @@ Output files (same names as before -- nothing downstream changes):
 Run:
     python regenerate_graph_artifacts.py
     python regenerate_graph_artifacts.py --source data/source-target.txt
-    python regenerate_graph_artifacts.py --manifest data/1000_manifest_final.json
+    python regenerate_graph_artifacts.py --manifest 1000_manifest_final_slugs_filled.json
 """
 
 from __future__ import annotations
@@ -56,8 +69,10 @@ for _p in [_here.parent, *_here.parents]:
 # Paths
 # ---------------------------------------------------------------------------
 
+sys.path.insert(0, str(REPO_ROOT))
+from source_paths import MANIFEST_PATH as DEFAULT_MANIFEST, TAXONOMY_PATH as DEFAULT_TAXONOMY
+
 DEFAULT_SOURCE_TARGET = REPO_ROOT / "data" / "source-target.txt"
-DEFAULT_MANIFEST      = REPO_ROOT / "data" / "1000_manifest_final.json"
 
 # data/ outputs (used by bkt.py, hlr.py, generate_dataset.py, sources.py)
 out_pt_edges_norm   = REPO_ROOT / "data" / "problem_topic_edges_normalized.json"
@@ -83,7 +98,8 @@ def load_source_target(path: Path) -> list[dict]:
 
 
 def load_manifest(path: Path) -> dict:
-    """Returns {title_slug: {problem_id, title, title_slug}}"""
+    """Returns {title_slug: {problem_id, title, title_slug}} for every record
+    in the manifest that has a slug -- not filtered by curated-edge coverage."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     result = {}
@@ -96,6 +112,15 @@ def load_manifest(path: Path) -> dict:
                 "title_slug": slug,
             }
     return result
+
+
+def load_canonical_topics(path: Path) -> list[str]:
+    """Returns the full 70-tag canonical vocabulary from
+    topic_tags_taxonomy_v2.json -- the single source of truth for which
+    topics exist, independent of which ones happen to have curated edges."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return sorted(data["canonical_tags"])
 
 
 def build_problem_topic_map(edges: list[dict]) -> dict[str, list[str]]:
@@ -161,7 +186,7 @@ def _find_repo_root(start: Path) -> Path:
     return start
 
 
-def main(source_target: Path, manifest_path: Path):
+def main(source_target: Path, manifest_path: Path, taxonomy_path: Path):
     print(f"\n{'='*64}")
     print("  REGENERATING GRAPH ARTIFACTS")
     print(f"  Source: {source_target}")
@@ -184,10 +209,25 @@ def main(source_target: Path, manifest_path: Path):
     print("[1/4] Loading inputs...")
     edges = load_source_target(source_target)
     manifest = load_manifest(manifest_path)
+    canonical_topics = load_canonical_topics(taxonomy_path)
 
-    topics_set = sorted({e["target"] for e in edges})
-    slugs_set  = sorted({e["source"] for e in edges})
-    print(f"      {len(edges)} edges | {len(slugs_set)} problems | {len(topics_set)} topics")
+    edge_slugs_set = sorted({e["source"] for e in edges})
+    # Node coverage is independent of edge coverage: every problem in the
+    # manifest becomes a node, every canonical topic becomes a node. Edges
+    # only exist where source-target.txt actually has curated data -- a
+    # problem/topic with no curated mapping is simply an isolated node,
+    # never given an invented tag.
+    # A curated edge can reference a slug the current manifest has since
+    # dropped (dataset drift) -- include those too so every edge still
+    # resolves to a node instead of being silently unresolvable downstream.
+    stray_edge_slugs = sorted(set(edge_slugs_set) - set(manifest.keys()))
+    slugs_set  = sorted(set(manifest.keys()) | set(edge_slugs_set))
+    topics_set = canonical_topics
+    uncovered  = len(slugs_set) - len(edge_slugs_set)
+    print(f"      {len(edges)} curated edges | {len(edge_slugs_set)} problems with a curated topic "
+          f"| {len(slugs_set)} total problem nodes ({uncovered} without curated topics, "
+          f"{len(stray_edge_slugs)} curated-only slugs not in manifest) "
+          f"| {len(topics_set)} canonical topic nodes")
 
     # -----------------------------------------------------------------------
     # Build derived structures
@@ -241,8 +281,13 @@ def main(source_target: Path, manifest_path: Path):
     ]
     write_json(out_topic_nodes, topic_nodes, "topic_nodes.json")
 
-    # problem_topic_edges.json for graph_builder -- uses manifest problem_id
-    slug_to_pid = {slug: manifest.get(slug, {}).get("problem_id", slug) for slug in slugs_set}
+    # problem_topic_edges.json for graph_builder -- uses manifest problem_id.
+    # Covers every edge source too, not just manifest slugs: source-target.txt
+    # can reference a handful of slugs the current manifest no longer has
+    # (dataset drift) -- fall back to the slug itself so those edges still
+    # resolve instead of crashing the whole regeneration.
+    slug_to_pid = {slug: manifest.get(slug, {}).get("problem_id", slug)
+                   for slug in set(slugs_set) | set(edge_slugs_set)}
     qg_pt_edges = [
         {
             "problem_id": slug_to_pid[e["source"]],
@@ -278,11 +323,13 @@ def main(source_target: Path, manifest_path: Path):
     # Summary
     # -----------------------------------------------------------------------
     print(f"\n[4/4] Verification summary:")
-    print(f"      Problems with at least 1 topic:  {len(pt_map)}")
-    print(f"      Canonical topics:                {len(topics_set)}")
-    print(f"      Problem-topic edges:             {len(edges)}")
-    print(f"      Topic-topic pairs (undirected):  {len(qg_tt_edges)}")
-    print(f"      Topic-topic edges (bidirectional): {len(tt_edges)}")
+    print(f"      Total problem nodes:              {len(slugs_set)}")
+    print(f"      Problems with at least 1 topic:   {len(pt_map)}")
+    print(f"      Problems with no curated topic:   {len(slugs_set) - len(pt_map)}")
+    print(f"      Total topic nodes (canonical):    {len(topics_set)}")
+    print(f"      Problem-topic edges:              {len(edges)}")
+    print(f"      Topic-topic pairs (undirected):   {len(qg_tt_edges)}")
+    print(f"      Topic-topic edges (bidirectional):{len(tt_edges)}")
     print()
     print("  All artifacts generated. Next step:")
     print("  Run the RGCN pipeline to rebuild embeddings:")
@@ -298,8 +345,11 @@ def main(source_target: Path, manifest_path: Path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source",   default=str(DEFAULT_SOURCE_TARGET),
-                        help="Path to source-target.txt ( curated mapping)")
+                        help="Path to source-target.txt (curated mapping)")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST),
-                        help="Path to 1000_manifest_final.json")
+                        help="Path to 1000_manifest_final_slugs_filled.json "
+                             "(falls back to data/1000_manifest_final.json if absent)")
+    parser.add_argument("--taxonomy", default=str(DEFAULT_TAXONOMY),
+                        help="Path to topic_tags_taxonomy_v2.json (canonical topic vocabulary)")
     args = parser.parse_args()
-    main(Path(args.source), Path(args.manifest))
+    main(Path(args.source), Path(args.manifest), Path(args.taxonomy))

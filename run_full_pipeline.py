@@ -56,11 +56,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-import db_env   # the ONE place .env gets loaded -- see db_env.py
+import db_env       # the ONE place .env gets loaded -- see db_env.py
+import source_paths # the ONE place the manifest/taxonomy paths live -- see source_paths.py
 
 QDRANT_URL     = db_env.QDRANT_URL
 QDRANT_API_KEY = db_env.QDRANT_API_KEY
-MANIFEST_PATH  = "data/1000_manifest_final.json"
+MANIFEST_PATH  = str(source_paths.MANIFEST_PATH)
 REQUIRED_COLLECTIONS = ["dsa_problems", "problems_full"]
 
 

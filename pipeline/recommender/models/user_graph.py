@@ -19,8 +19,12 @@ Telemetry sources (what feeds each edge type):
   MASTERED   <- UserTopicMastery (mastery_score, sm2_ef, next_review_date)
   WEAK       <- ConceptGapProfile (gap_name maps to concept slug, severity)
   EXPOSED    <- RecommendationLog (recommended_at, was_skipped, skip_count)
-  PREREQ     <- TopicPrerequisite (offline, loaded once at startup)
-  COOCCURS   <- question-graph/data/topic_topic_edges.json (offline jaccard)
+  PREREQ     <- Neo4j :OfflineTopic PREREQ_OFFLINE, loaded once at startup
+                (falls back to Postgres TopicPrerequisite if Neo4j is down)
+  COOCCURS   <- Neo4j :OfflineTopic CO_OCCURS_OFFLINE, loaded once at
+                startup (offline jaccard weight) -- Neo4j-only, no local
+                JSON fallback (see user_graph_service.py's
+                load_offline_concept_graph)
 """
 
 from __future__ import annotations

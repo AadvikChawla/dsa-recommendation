@@ -220,12 +220,23 @@ class TestNeo4jGraphStoreRoundTrip(unittest.TestCase):
         self.assertAlmostEqual(loaded.concept_edges["arrays"].mastery_score, 0.8)
         self.assertAlmostEqual(loaded.concept_edges["arrays"].confidence, 0.9)
 
-    def test_save_then_load_preserves_cc_edges(self):
+    def test_load_does_not_fetch_cc_edges(self):
+        """
+        cc_edges are ALWAYS the static offline concept graph (never a
+        per-user value -- see UserGraphService._load_cc_edges), so
+        Neo4jGraphStore no longer writes or reads them at all: doing so
+        was a redundant Neo4j round trip for data already sitting in
+        UserGraphService's in-memory _PREREQ_CACHE (see the FIX comments
+        in neo4j_graph_store.py's _save_tx/load). A bare
+        Neo4jGraphStore.load() -- bypassing UserGraphService -- must come
+        back with empty cc_edges; attaching _PREREQ_CACHE is
+        UserGraphService.get()'s job (see test_user_graph.py /
+        TestOfflineCCEdges and TestCCEdgesAttachedAfterNeo4jLoad below).
+        """
         g = _sample_graph()
         self.store.save(g)
         loaded = self.store.load("u1")
-        self.assertIn("arrays", loaded.cc_edges)
-        self.assertEqual(loaded.cc_edges["arrays"][0].target_slug, "dp")
+        self.assertEqual(loaded.cc_edges, {})
 
     def test_save_then_load_preserves_solved_ids(self):
         g = _sample_graph()
@@ -233,15 +244,31 @@ class TestNeo4jGraphStoreRoundTrip(unittest.TestCase):
         loaded = self.store.load("u1")
         self.assertIn("p1", loaded.solved_ids)
 
-    def test_lock_check_works_after_load(self):
+    def test_lock_check_works_after_load_via_user_graph_service(self):
+        """
+        is_locked() needs cc_edges, which now only ever come from
+        UserGraphService's in-memory _PREREQ_CACHE (see
+        test_load_does_not_fetch_cc_edges above) -- so the real
+        Neo4j-cache-hit path this exercises is UserGraphService.get(),
+        not a bare Neo4jGraphStore.load().
+        """
+        import pipeline.recommender.services.user_graph_service as svc_mod
+
         g = UserGraph(user=UserNode(user_id="u2"))
         g.add_concept_edge(ConceptEdge(
             "arrays", EdgeType.LEARNING, mastery_score=0.3,
         ))
-        g.add_cc_edge(ConceptConceptEdge("arrays", "dp", EdgeType.PREREQ, 1.0))
         self.store.save(g)
-        loaded = self.store.load("u2")
-        self.assertTrue(loaded.is_locked(["dp"]))
+
+        svc_mod._PREREQ_CACHE["arrays"] = [
+            ConceptConceptEdge("arrays", "dp", EdgeType.PREREQ, 1.0)
+        ]
+        try:
+            service = UserGraphService(db=None, redis=None, neo4j=self.store)
+            loaded = service.get("u2")
+            self.assertTrue(loaded.is_locked(["dp"]))
+        finally:
+            svc_mod._PREREQ_CACHE.clear()
 
     def test_resave_updates_rather_than_duplicates(self):
         g = _sample_graph()

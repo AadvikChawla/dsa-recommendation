@@ -23,13 +23,14 @@ Separation is two-layered:
 
 Callers (pipeline/recommender/services/user_graph_service.py's
 load_offline_concept_graph, pipeline/recommender/bkt.py, pipeline/
-recommender/hlr.py) try Neo4j FIRST and fall back to the local JSON
-files (question-graph/data/topic_topic_edges.json,
-data/problem_topic_edges_normalized.json) if Neo4j is unavailable --
-same graceful-degrade convention as every other Neo4j touchpoint in this
-repo. Neo4j being unreachable (unset credentials, network partition, DNS
-failure) is never fatal; it just means this run uses the static files
-instead of the shared, centrally-updated graph.
+recommender/hlr.py) read Neo4j ONLY -- no local JSON fallback. The local
+JSON files this module's write side reads from (question-graph/data/*.json,
+data/*_normalized.json) are offline build artifacts / intermediate steps
+for regenerate_graph_artifacts.py and push_offline_graph_to_neo4j.py, not
+something any runtime request-serving code should read directly. Neo4j
+being unreachable (unset credentials, network partition, DNS failure) is
+never fatal to these callers; it just means they start with an empty
+offline-graph mapping until Neo4j is reachable again.
 
 Usage (write, e.g. from the offline pipeline after regenerate_graph_artifacts.py):
     from pipeline.graphs.neo4j_offline_writer import write_offline_graph
@@ -87,10 +88,12 @@ def write_offline_graph(
                           problem up by either key.
 
     Returns True if the write succeeded, False if Neo4j is unavailable
-    (matches Neo4jGraphStore's graceful no-op-on-unavailable convention --
-    the offline pipeline's other outputs, Qdrant + local JSON/parquet
-    files, are still the source of truth this repo runs on day to day;
-    Neo4j mirroring here is additive, not required).
+    (matches Neo4jGraphStore's graceful no-op-on-unavailable convention).
+    Note this is no longer purely additive: bkt.py/hlr.py/
+    user_graph_service.py read the offline concept graph from Neo4j ONLY
+    (no local JSON fallback) -- if this write doesn't happen (or fails),
+    those callers see an empty offline graph until it does, regardless of
+    what question-graph/data/*.json still has on disk.
     """
     driver = db_env.neo4j_driver()
     if driver is None:

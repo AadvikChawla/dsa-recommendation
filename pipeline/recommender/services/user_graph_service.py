@@ -16,9 +16,12 @@ prerequisite gating (UserGraph.is_locked) and co-occurrence-based
 exploration (NoveltyPool) were silent no-ops regardless of what data
 existed):
     - concept_graph: dict[slug -> list[ConceptConceptEdge]]
-      Neo4j FIRST (pipeline/graphs/neo4j_offline_writer.py), falling back
-      to question-graph/data/topic_topic_edges.json + Postgres
-      TopicPrerequisite table if Neo4j is unavailable.
+      CO_OCCURS: Neo4j-only (pipeline/graphs/neo4j_offline_writer.py) --
+      no local JSON fallback; Neo4j is the single source of truth for the
+      offline graph.
+      PREREQ: Neo4j first, falling back to the Postgres TopicPrerequisite
+      table (a live DB, not a static file, so it's not subject to the
+      "no JSON fallback" rule) if Neo4j is unavailable.
 
 Online telemetry (loaded per-user on request):
     - Submission         → ProblemEdge (SOLVED / ATTEMPTED)
@@ -41,7 +44,6 @@ import json
 import math
 import time
 import logging
-from pathlib import Path
 from typing import Optional
 
 from pipeline.recommender.models.user_graph import (
@@ -54,8 +56,6 @@ from database.postgres.db import (
 
 log = logging.getLogger(__name__)
 
-# Path to offline graph — relative to project root
-_TOPIC_TOPIC_JSON = Path("question-graph") / "data" / "topic_topic_edges.json"
 _PREREQ_CACHE: dict[str, list[ConceptConceptEdge]] = {}   # loaded once
 
 
@@ -65,16 +65,14 @@ _PREREQ_CACHE: dict[str, list[ConceptConceptEdge]] = {}   # loaded once
 
 def load_offline_concept_graph(db=None) -> dict[str, list[ConceptConceptEdge]]:
     """
-    Load concept<->concept edges. Neo4j FIRST (pipeline/graphs/
-    neo4j_offline_writer.py's :OfflineTopic graph, the shared,
-    centrally-updated copy any pipeline run can push to), falling back to
-    the local JSON file + Postgres if Neo4j is unavailable or empty --
-    same graceful-degrade convention as every other Neo4j touchpoint in
-    this repo (see neo4j_offline_writer.py's module docstring for the
-    full separation-from-the-online-graph rationale):
-      1. Neo4j :OfflineTopic CO_OCCURS_OFFLINE / PREREQ_OFFLINE edges.
-      2. Fallback: question-graph/data/topic_topic_edges.json (CO_OCCURS)
-         + Postgres TopicPrerequisite table (PREREQ).
+    Load concept<->concept edges.
+      1. Neo4j :OfflineTopic CO_OCCURS_OFFLINE edges (pipeline/graphs/
+         neo4j_offline_writer.py's shared, centrally-updated copy) --
+         Neo4j-only, no local JSON fallback: Neo4j is the single source of
+         truth for the offline graph.
+      2. Neo4j :OfflineTopic PREREQ_OFFLINE edges, falling back to the
+         Postgres TopicPrerequisite table (a live DB, not a static file)
+         if Neo4j is unavailable or empty.
     Returns {source_slug: [ConceptConceptEdge, ...]}
     """
     global _PREREQ_CACHE
@@ -92,29 +90,8 @@ def load_offline_concept_graph(db=None) -> dict[str, list[ConceptConceptEdge]]:
                 edge_type=EdgeType.COOCCURS, weight=weight,
             ))
         log.info("Loaded %d CO_OCCURS concept edges from Neo4j", len(neo4j_cooccurs))
-    elif _TOPIC_TOPIC_JSON.exists():
-        try:
-            raw = json.loads(_TOPIC_TOPIC_JSON.read_text(encoding="utf-8-sig"))
-            for e in raw:
-                src = str(e.get("source") or e.get("source_topic_id") or "")
-                tgt = str(e.get("target") or e.get("target_topic_id") or "")
-                if not src or not tgt:
-                    continue
-                shared = int(e.get("shared_problem_count", 0))
-                if shared < 2:          # drop single-problem noise
-                    continue
-                edge = ConceptConceptEdge(
-                    source_slug=src,
-                    target_slug=tgt,
-                    edge_type=EdgeType.COOCCURS,
-                    weight=float(e.get("jaccard", 0.0)),
-                )
-                cc.setdefault(src, []).append(edge)
-            log.info("Neo4j unavailable/empty -- loaded %d CO_OCCURS concept "
-                     "edges from local JSON instead",
-                     sum(len(v) for v in cc.values()))
-        except Exception as exc:
-            log.warning("Failed to load topic_topic_edges.json: %s", exc)
+    else:
+        log.warning("Neo4j unavailable/empty -- no CO_OCCURS concept edges loaded.")
 
     if neo4j_prereq:
         for prereq, unlocks in neo4j_prereq:
@@ -192,6 +169,11 @@ class UserGraphService:
         if self._neo4j is not None:
             durable = self._neo4j.load(user_id)
             if durable is not None:
+                # Neo4jGraphStore.load() no longer fetches cc_edges (see its
+                # FIX comment) -- it's always the same static offline concept
+                # graph regardless of user, so attach the in-memory copy
+                # here instead of paying for a redundant Neo4j round trip.
+                self._load_cc_edges(durable)
                 self._to_cache(user_id, durable)   # refresh the fast tier
                 return durable
 

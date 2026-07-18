@@ -1,6 +1,4 @@
-import json
 import math
-import os
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -13,19 +11,12 @@ from pipeline.recommender.telemetry import (
 # Load problem->topic mapping -- this is only the FALLBACK path
 # process_submission() uses when the caller doesn't send problemTopics
 # directly in the request body (see process_submission's docstring); the
-# primary path never touches this. Neo4j FIRST (pipeline/graphs/
-# neo4j_offline_writer.py's shared, centrally-updated copy), falling back
-# to the local JSON file if Neo4j is unavailable -- same graceful-degrade
-# convention as every other Neo4j touchpoint in this repo.
-_BASE_DIR = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
-_pt_edges_path = os.path.join(
-    _BASE_DIR,
-    "data",
-    "problem_topic_edges_normalized.json",
-)
-
+# primary path never touches this. Neo4j-only (pipeline/graphs/
+# neo4j_offline_writer.py's shared, centrally-updated copy) -- no local
+# JSON fallback: Neo4j is the single source of truth for the offline
+# graph, so an unreachable Neo4j means an empty mapping here (this
+# fallback path is only ever exercised when the caller didn't send
+# problemTopics anyway), not a silent read of a possibly-stale local file.
 problem_to_topics = defaultdict(list)
 try:
     from pipeline.graphs.neo4j_offline_writer import load_problem_topics
@@ -33,26 +24,14 @@ try:
 except Exception:
     _neo4j_pt = {}
 
-if _neo4j_pt:
-    for slug, topics in _neo4j_pt.items():
-        problem_to_topics[slug] = list(topics)
+for slug, topics in _neo4j_pt.items():
+    problem_to_topics[slug] = list(topics)
+
+if problem_to_topics:
     print(f"Loaded topic mappings for {len(problem_to_topics)} problems (from Neo4j)")
 else:
-    try:
-        with open(_pt_edges_path) as f:
-            pt_edges = json.load(f)
-    except FileNotFoundError:
-        print(
-            f"[!] {_pt_edges_path} not found -- bkt.py starting with an EMPTY "
-            f"problem->topic mapping."
-        )
-        pt_edges = []
-
-    for edge in pt_edges:
-        problem_to_topics[edge["source"]].append(edge["target"])
-
-    print(f"Loaded topic mappings for {len(problem_to_topics)} problems "
-          f"(Neo4j unavailable/empty -- from local JSON)")
+    print("[!] Neo4j unavailable/empty -- bkt.py starting with an EMPTY "
+          "problem->topic mapping.")
 
 BKT_PARAMS = {
     "P_T": 0.1,   # probability of learning after one attempt

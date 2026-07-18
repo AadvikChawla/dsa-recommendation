@@ -45,7 +45,7 @@ import logging
 from typing import Optional
 
 from pipeline.recommender.models.user_graph import (
-    UserGraph, UserNode, ProblemEdge, ConceptEdge, ConceptConceptEdge, EdgeType,
+    UserGraph, UserNode, ProblemEdge, ConceptEdge, EdgeType,
 )
 
 log = logging.getLogger(__name__)
@@ -166,18 +166,18 @@ class Neo4jGraphStore:
                 last_attempted=edge.last_attempted,
             )
 
-        for src, edges in graph.cc_edges.items():
-            for cc in edges:
-                tx.run(
-                    """
-                    MERGE (a:Concept {slug: $src})
-                    MERGE (b:Concept {slug: $tgt})
-                    MERGE (a)-[e:CC_EDGE {edge_type: $edge_type}]->(b)
-                    SET e.weight = $weight
-                    """,
-                    src=cc.source_slug, tgt=cc.target_slug,
-                    edge_type=cc.edge_type.value, weight=cc.weight,
-                )
+        # FIX (P2 -- wasted Neo4j round trips): graph.cc_edges is ALWAYS the
+        # full offline concept<->concept graph copied verbatim from
+        # UserGraphService._PREREQ_CACHE (see its _load_cc_edges docstring
+        # -- no caller ever adds a user-specific cc_edge), so writing it
+        # here re-persisted the exact same static data under every single
+        # user's save() call, and this class's load() used to re-fetch
+        # that same static data with an unscoped full-table MATCH on every
+        # cache miss. Neither side added anything UserGraphService.get()
+        # can't already get for free from its own in-memory
+        # _PREREQ_CACHE, which it now attaches after a Neo4j load just
+        # like it already does after a Postgres rebuild. Dropped both
+        # the write here and the corresponding CC_EDGE read in load().
 
     # ------------------------------------------------------------- load
 
@@ -252,21 +252,10 @@ class Neo4jGraphStore:
                 last_attempted=e.get("last_attempted"),
             )
 
-        # cc_edges are concept<->concept, not user-scoped -- load the
-        # subgraph reachable from this user's touched concepts plus one
-        # hop out (covers prereqs of untouched target concepts too, same
-        # fix as UserGraphService._load_cc_edges).
-        for rec in tx.run(
-            """
-            MATCH (a:Concept)-[e:CC_EDGE]->(b:Concept)
-            RETURN a.slug AS src, b.slug AS tgt, e
-            """
-        ):
-            e = rec["e"]
-            graph.add_cc_edge(ConceptConceptEdge(
-                source_slug=rec["src"], target_slug=rec["tgt"],
-                edge_type=EdgeType(e["edge_type"]), weight=e.get("weight", 1.0),
-            ))
+        # cc_edges are NOT loaded from Neo4j here anymore -- see the FIX
+        # comment in _save_tx above. UserGraphService.get() attaches the
+        # in-memory offline concept graph (_PREREQ_CACHE) to whatever this
+        # method returns, same as it does after a Postgres rebuild.
 
         return graph
 

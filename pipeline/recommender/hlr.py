@@ -1,22 +1,13 @@
-import json
 import math
-import os
 from collections import defaultdict
 from datetime import datetime, timezone
 
 from pipeline.recommender.telemetry import compute_telemetry_signal_from_submission
 
-# Load problem to topics mapping. Neo4j FIRST (pipeline/graphs/
-# neo4j_offline_writer.py's shared, centrally-updated copy), falling back
-# to the local JSON file (absolute path so this works regardless of the
-# working directory the process is launched from) if Neo4j is unavailable
-# -- same graceful-degrade convention as every other Neo4j touchpoint in
-# this repo, and the same fallback bkt.py uses. Falls back to an empty
-# mapping (with a warning) instead of crashing at import time if both are
-# unavailable.
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_pt_edges_path = os.path.join(_BASE_DIR, "data", "problem_topic_edges_normalized.json")
-
+# Load problem to topics mapping. Neo4j-only (pipeline/graphs/
+# neo4j_offline_writer.py's shared, centrally-updated copy) -- no local
+# JSON fallback, matching bkt.py. Falls back to an empty mapping (with a
+# warning) instead of crashing at import time if Neo4j is unavailable.
 problem_to_topics = defaultdict(list)
 try:
     from pipeline.graphs.neo4j_offline_writer import load_problem_topics
@@ -24,20 +15,12 @@ try:
 except Exception:
     _neo4j_pt = {}
 
-if _neo4j_pt:
-    for slug, topics in _neo4j_pt.items():
-        problem_to_topics[slug] = list(topics)
-else:
-    try:
-        with open(_pt_edges_path) as f:
-            pt_edges = json.load(f)
-    except FileNotFoundError:
-        print(f"[!] {_pt_edges_path} not found -- hlr.py starting with an EMPTY "
-              f"problem->topic mapping.")
-        pt_edges = []
+for slug, topics in _neo4j_pt.items():
+    problem_to_topics[slug] = list(topics)
 
-    for edge in pt_edges:
-        problem_to_topics[edge["source"]].append(edge["target"])
+if not problem_to_topics:
+    print("[!] Neo4j unavailable/empty -- hlr.py starting with an EMPTY "
+          "problem->topic mapping.")
 
 MIN_HALF_LIFE = 1.0
 MAX_HALF_LIFE = 180.0

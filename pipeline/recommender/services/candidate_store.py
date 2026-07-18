@@ -103,6 +103,22 @@ class InMemoryCandidateStore(CandidateStore):
         self._by_id: dict = {}       # set_id -> StoredCandidateSet
 
     def save(self, user_id: str, candidates: list, difficulty_plan: dict) -> StoredCandidateSet:
+        # FIX (unbounded memory growth): _by_id only ever gained entries --
+        # _by_user[user_id] gets overwritten on every save (old set becomes
+        # unreachable from there), but nothing ever dropped the superseded
+        # set_id from _by_id, so a long-running process accumulated one
+        # entry per /recommend call FOREVER, eventually exhausting memory.
+        # Evict the user's previous set_id (now superseded) plus any other
+        # expired entries encountered while we're already touching this dict
+        # -- keeps steady-state size bounded by (live users) + (recent
+        # expired stragglers), not by total request count over process
+        # lifetime.
+        previous = self._by_user.get(user_id)
+        if previous is not None:
+            self._by_id.pop(previous.set_id, None)
+        for stale_id in [sid for sid, s in self._by_id.items() if s.is_expired]:
+            del self._by_id[stale_id]
+
         cs = StoredCandidateSet(
             set_id=str(uuid.uuid4()),
             user_id=user_id,

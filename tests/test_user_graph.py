@@ -986,57 +986,43 @@ class TestEdgeMerge(unittest.TestCase):
 # ===========================================================================
 
 class TestOfflineCCEdges(unittest.TestCase):
+    """
+    load_offline_concept_graph's CO_OCCURS edges are Neo4j-only now -- no
+    local JSON fallback (see neo4j_offline_writer.py's module docstring and
+    user_graph_service.py's load_offline_concept_graph docstring for why:
+    Neo4j is the single source of truth for the offline graph). These used
+    to round-trip through a temp question-graph/data/topic_topic_edges.json
+    file and monkeypatch module-level _TOPIC_TOPIC_JSON, which no longer
+    exists; rewritten to mock the actual Neo4j read function instead.
+    """
 
-    def test_load_from_json(self, tmp_path=None):
-        import tempfile, os
-        data = [
-            {"source": "arrays", "target": "sorting",
-             "edgeType": "CO_OCCURS_WITH",
-             "shared_problem_count": 5, "jaccard": 0.3},
-        ]
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
-            json.dump(data, f)
-            tmp = f.name
-
-        import pipeline.recommender.services.user_graph_service as svc_mod
-        from pathlib import Path
-        orig = svc_mod._TOPIC_TOPIC_JSON
-        svc_mod._TOPIC_TOPIC_JSON = Path(tmp)
-        try:
+    def test_load_from_neo4j(self):
+        with patch(
+            "pipeline.graphs.neo4j_offline_writer.load_cooccurs_edges",
+            return_value=[("arrays", "sorting", 0.3)],
+        ), patch(
+            "pipeline.graphs.neo4j_offline_writer.load_prereq_edges",
+            return_value=[],
+        ):
             cc = load_offline_concept_graph(db=None)
-        finally:
-            svc_mod._TOPIC_TOPIC_JSON = orig
-            os.unlink(tmp)
 
         self.assertIn("arrays", cc)
         self.assertEqual(cc["arrays"][0].target_slug, "sorting")
         self.assertAlmostEqual(cc["arrays"][0].weight, 0.3)
 
-    def test_low_shared_count_filtered(self):
-        import tempfile, os
-        data = [
-            {"source": "a", "target": "b",
-             "edgeType": "CO_OCCURS_WITH",
-             "shared_problem_count": 1, "jaccard": 0.1},
-        ]
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
-            json.dump(data, f); tmp = f.name
-
-        import pipeline.recommender.services.user_graph_service as svc_mod
-        from pathlib import Path
-        orig = svc_mod._TOPIC_TOPIC_JSON
-        svc_mod._TOPIC_TOPIC_JSON = Path(tmp)
-        try:
+    def test_empty_when_neo4j_unavailable(self):
+        """No local JSON fallback -- Neo4j unavailable/empty means an empty
+        CO_OCCURS mapping, not a read of some local file."""
+        with patch(
+            "pipeline.graphs.neo4j_offline_writer.load_cooccurs_edges",
+            return_value=[],
+        ), patch(
+            "pipeline.graphs.neo4j_offline_writer.load_prereq_edges",
+            return_value=[],
+        ):
             cc = load_offline_concept_graph(db=None)
-        finally:
-            svc_mod._TOPIC_TOPIC_JSON = orig
-            os.unlink(tmp)
 
-        self.assertNotIn("a", cc)
+        self.assertEqual(cc, {})
 
 
 # ===========================================================================
